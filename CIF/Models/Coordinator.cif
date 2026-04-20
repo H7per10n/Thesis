@@ -1,0 +1,135 @@
+/*
+DISTRIBUTED BLDC MOTOR CONTROL NETWORK
+
+GENERAL SYSTEM:
+  - Scalable architecture (N motors on CAN bus)
+  - Coordinated control with safety supervision
+  - Autonomous fault recovery
+  - Counter-based safety limits
+
+EXPERIMENTAL DEMONSTRATION (N=2):
+  - Application: Balanced Ventilation System (HRV/ERV)
+  - NODE1: Supply Fan (fresh air intake)
+  - NODE2: Exhaust Fan (stale air exhaust)
+  - Critical requirement: Balanced airflow (pressure stability)
+
+EXTENSIBILITY:
+  - N=3: Triple-fan system (supply + exhaust + recirculation)
+  - N=4: Dual-zone HVAC (two independent HRV units)
+  - N=6: Multi-zone building automation
+  - Other: Conveyor systems, pump arrays, multi-axis machines
+
+*/
+//==============================================================================
+// System Coordinator - Distributed Motor Control Network
+//==============================================================================
+//
+// GENERAL: Orchestrates N motor nodes for coordinated operation
+// EXPERIMENTAL CASE (N=2): Balanced Ventilation System (HRV/ERV)
+//   - NODE1: Supply fan (fresh air intake)
+//   - NODE2: Exhaust fan (stale air exhaust)
+//
+// SCALABILITY: Architecture supports arbitrary N nodes on CAN bus
+//   - Requirements adapt to application (balance, sync, independence)
+//   - Coordinator phases remain consistent across applications
+//
+//==============================================================================
+
+plant def sys_coordinator():
+    //==========================================================================
+    // OPERATOR INTERFACE (Application-specific)
+    //==========================================================================
+    // General: System start/stop commands
+    // HVAC case: Building automation or wall controller
+
+    uncontrollable u_start;  // Operator: Start coordinated operation
+    uncontrollable u_stop;   // Operator: Stop coordinated operation
+    uncontrollable u_technician_reset;
+    //==========================================================================
+    // AUTONOMOUS TRANSITIONS (Supervisor-determined)
+    //==========================================================================
+    // General: System-level state transitions based on node health
+    // Requirements define exact conditions per application
+
+    controllable c_nodes_ready;      // All nodes initialized
+    controllable c_all_calibrated;   // All nodes characterized
+    controllable c_all_stopped;      // All nodes stopped
+    controllable c_node_unhealthy;   // Any node in fault/error state
+    controllable c_all_healthy;      // All nodes recovered
+    controllable c_limits_exceeded;  // Safety thresholds exceeded
+    controllable c_all_power_lost;   // Power failure (all nodes)
+    controllable c_power_restored;   // Power restored
+
+    disc int [0..300] velocity=1;
+    //==========================================================================
+    // SYSTEM LIFECYCLE (Application-independent phases)
+    //==========================================================================
+
+    // IDLE: System off, nodes should be idle or in error states
+    location IDLE:
+        initial; marked;
+        edge u_start goto BOOTING;
+        edge c_all_power_lost goto NO_POWER;
+
+    // BOOTING: Nodes transitioning from INIT to operational readiness
+    location BOOTING:
+        edge c_nodes_ready goto CALIBRATING;
+        edge c_node_unhealthy goto RECOVERING;
+        edge c_limits_exceeded goto EMERGENCY;
+        edge u_stop goto IDLE;
+        edge c_all_power_lost goto NO_POWER;
+
+    // CALIBRATING: Parameter characterization (sequential per hardware constraints)
+    location CALIBRATING:
+        edge c_all_calibrated goto RUNNING;
+        edge c_node_unhealthy goto RECOVERING;
+        edge c_limits_exceeded goto EMERGENCY;
+        edge u_stop goto STOPPING;
+        edge c_all_power_lost goto NO_POWER;
+
+    // RUNNING: Normal coordinated operation
+    location RUNNING:
+        marked;
+        edge c_node_unhealthy goto RECOVERING;
+        edge u_stop goto STOPPING;
+        edge c_all_power_lost goto NO_POWER;
+
+    // STOPPING: Coordinated shutdown
+    location STOPPING:
+        edge c_all_stopped goto IDLE;
+        edge c_node_unhealthy goto RECOVERING;
+        edge c_all_power_lost goto NO_POWER;
+
+    // RECOVERING: Fault recovery (sequential per power supply constraints)
+    location RECOVERING:
+        marked;
+        edge c_all_healthy goto BOOTING;
+        edge c_limits_exceeded goto EMERGENCY;
+        edge c_all_power_lost goto NO_POWER;
+
+    // EMERGENCY: Safety limits exceeded - operator intervention required
+    location EMERGENCY:
+        marked;
+        edge u_technician_reset goto BOOTING;  // Reset before restart
+        edge c_all_power_lost goto NO_POWER;
+
+    // NO_POWER: Power supply failure
+    location NO_POWER:
+        marked;
+        edge c_power_restored goto RECOVERING;
+end
+
+
+group def HMI_IF():
+    input bool _u_start, _u_stop, _u_technician_reset;
+end
+
+group def System_Coordinator():
+     _   : sys_coordinator();
+// linking u events to Human Machine Interface
+     HMI : HMI_IF();
+     plant invariant _.u_start                       needs HMI._u_start and not HMI._u_stop;
+     plant invariant _.u_stop                        needs HMI._u_stop and not HMI._u_start;
+     plant invariant _.u_technician_reset            needs HMI._u_technician_reset;
+//UNCOMMENT FOR DEPLOYMENT
+end

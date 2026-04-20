@@ -12,7 +12,7 @@ set -o pipefail # Catch pipeline failures
 COMPILE_OPTIONS="-DPRINT_OUTPUT=1 -DEVENT_OUTPUT=1 -DCHECK_RANGES=1"
 
 # Paths
-GEN_SRC="$HOME/gen"
+GEN_SRC="CIF/gen"
 DEST_DIR="bin"
 
 # Compiler flags

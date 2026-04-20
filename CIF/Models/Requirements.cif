@@ -1,0 +1,384 @@
+//==============================================================================
+// System Requirements - Distributed Motor Control Network
+//==============================================================================
+//
+// GENERAL FRAMEWORK: Safety policies for N-node coordinated motor control
+// EXPERIMENTAL CASE (N=2): Balanced Ventilation System (HRV/ERV)
+//
+// APPLICATION CONTEXT (N=2 HVAC):
+//   NODE1 = Supply fan (brings fresh outdoor air into building)
+//   NODE2 = Exhaust fan (expels stale indoor air from building)
+//
+//   SAFETY REQUIREMENT: Supply CFM approximately equals Exhaust CFM
+//     - Prevents building pressure imbalance
+//     - Avoids backdrafting (combustion safety hazard)
+//     - Maintains indoor air quality (IAQ)
+//     - Both fans MUST run together or not at all
+//
+// EXTENSIBILITY: Requirements generalize to N>2 based on application
+//   - Synchronous operation (all-or-nothing): HVAC, conveyor arrays
+//   - Independent operation: Multi-zone systems, pump redundancy
+//   - Hierarchical coordination: Master-slave, leader-follower
+//
+//==============================================================================
+
+import "NET.cif";
+
+//==============================================================================
+// SAFETY THRESHOLDS (Application-tunable)
+//==============================================================================
+
+const int MAX_FAULTS   = 5;  // Max fault events before emergency
+const int MAX_POWER    = 3;  // Max power cycles before emergency
+const int MAX_CAL      = 3;  // Max calibration failures before emergency
+const int MAX_RECOVERY = 3;  // Max recovery attempts before emergency
+const int MAX_REBOOT   = 3;  // Max reboots before emergency
+
+alg bool LIMIT_EXHAUSTED = (
+    Net.NODE1._.fault_cnt >= MAX_FAULTS or
+    Net.NODE1._.power_cc_cnt >= MAX_POWER or
+    Net.NODE1._.recovery_att_cnt >= MAX_RECOVERY or
+    Net.NODE1._.calibration_att_cnt >= MAX_CAL or
+    Net.NODE1._.reboot_cnt >= MAX_REBOOT or
+    Net.NODE2._.fault_cnt >= MAX_FAULTS or
+    Net.NODE2._.power_cc_cnt >= MAX_POWER or
+    Net.NODE2._.recovery_att_cnt >= MAX_RECOVERY or
+    Net.NODE2._.calibration_att_cnt >= MAX_CAL or
+    Net.NODE2._.reboot_cnt >= MAX_REBOOT
+    );
+
+//==============================================================================
+// CATEGORY 1: COORDINATOR AUTONOMOUS TRANSITIONS (8 requirements)
+//==============================================================================
+// Define WHEN system-level controllable events can fire based on node states.
+// These requirements enable coordinator transitions by checking node health,
+// completion status, and readiness conditions.
+//==============================================================================
+
+// R1: Nodes Ready for Calibration
+// Description: Both nodes completed hardware initialization and are ready
+// Rationale: Ensures both fans finished INIT phase (hardware setup, sensor
+//            check, driver configuration) before proceeding to calibration
+requirement Net.coord._.c_nodes_ready needs
+    (Net.NODE1._.NEEDS_RECAL or Net.NODE1._.IDLE or Net.NODE1._.CAL_FAILED) and
+    (Net.NODE2._.NEEDS_RECAL or Net.NODE2._.IDLE or Net.NODE2._.CAL_FAILED);
+
+// R2: All Nodes Calibrated
+// Description: Both nodes successfully calibrated motor parameters
+// Rationale: Ensures accurate CFM/RPM mapping before allowing operation.
+//            Calibration measures motor resistance, inductance, and pole pairs
+requirement Net.coord._.c_all_calibrated needs
+    (Net.NODE1._.IDLE and Net.NODE2._.IDLE) and (not LIMIT_EXHAUSTED);
+
+// R3: All Nodes Stopped
+// Description: Coordinated shutdown complete, both fans spun down
+// Rationale: Only transition to IDLE when both fans confirmed stopped.
+//            Prevents premature state change during shutdown sequence
+requirement Net.coord._.c_all_stopped needs
+    Net.coord._.STOPPING and
+    (Net.NODE1._.IDLE or Net.NODE1._.NEEDS_RECAL) and
+    (Net.NODE2._.IDLE or Net.NODE2._.NEEDS_RECAL);
+
+// R4: Node Unhealthy (Single Node Fault)
+// Description: Any node entered error/fault state, OR single node lost power
+// Rationale: For HVAC, prevents operating with only one fan (pressure
+//            imbalance). Single node power loss triggers RECOVERING, but both
+//            nodes losing power simultaneously triggers NO_POWER (see R7)
+requirement Net.coord._.c_node_unhealthy needs
+    (Net.NODE1._.FAULT or Net.NODE1._.SETUP_ERROR ) or
+    (Net.NODE2._.FAULT or Net.NODE2._.SETUP_ERROR ) or
+    (Net.NODE1._.NO_POWER and not Net.NODE2._.NO_POWER) or
+    (Net.NODE2._.NO_POWER and not Net.NODE1._.NO_POWER);
+
+// R5: All Nodes Recovered
+// Description: Both nodes returned to healthy states after fault recovery
+// Rationale: Accepts both IDLE and NEEDS_RECAL to handle asymmetric recovery
+//            (one node was calibrated, other lost calibration during fault).
+//            System can now restart from BOOTING
+requirement Net.coord._.c_all_healthy needs
+    Net.coord._.RECOVERING and
+    (Net.NODE1._.IDLE or Net.NODE1._.NEEDS_RECAL) and
+    (Net.NODE2._.IDLE or Net.NODE2._.NEEDS_RECAL);
+
+// R6: Safety Counter Limits Exceeded
+// Description: Any retry counter on either node reached maximum threshold
+// Rationale: Escalates to EMERGENCY when automatic recovery exhausted.
+//            Prevents infinite retry loops on persistent hardware faults
+//            (broken bearing, severed wire, failed sensor)
+requirement Net.coord._.c_limits_exceeded needs LIMIT_EXHAUSTED;
+
+// R7: Total Power Loss
+// Description: Both nodes lost power simultaneously
+// Rationale: Distinguishes building power failure (both nodes) from single
+//            node power fault. Coordinator tracks outage in NO_POWER state
+requirement Net.coord._.c_all_power_lost needs
+    Net.NODE1._.NO_POWER and Net.NODE2._.NO_POWER;
+
+// R8: Power Restored
+// Description: Building power returned, nodes exited NO_POWER state
+// Rationale: Nodes transition NO_POWER -> FAULT (with reason=POWER_RESTORE)
+//            when power returns. Coordinator can now proceed to recovery
+requirement Net.coord._.c_power_restored needs
+    Net.coord._.NO_POWER and
+    not Net.NODE1._.NO_POWER and not Net.NODE2._.NO_POWER;
+
+//==============================================================================
+// CATEGORY 2: PHASE GATING (4 requirements)
+//==============================================================================
+// Restrict node commands to appropriate coordinator phases. Ensures operations
+// occur in correct sequence (init -> calibrate -> run -> stop).
+//==============================================================================
+
+// R9-R10: Calibration Phase Gating
+// Description: Calibration only permitted during CALIBRATING system phase
+// Rationale: Ensures calibration happens after initialization but before
+//            operation. Prevents calibration during active operation
+requirement Net.NODE1._.c_calibrate needs Net.coord._.CALIBRATING ;
+requirement Net.NODE2._.c_calibrate needs Net.coord._.CALIBRATING ;
+
+// R11-R12: Enable Phase Gating
+// Description: Motors can only spin when system in RUNNING phase
+// Rationale: Prevents motors starting during initialization, calibration,
+//            or shutdown. Ensures coordinated startup
+requirement Net.NODE1._.c_enable needs Net.coord._.RUNNING;
+requirement Net.NODE2._.c_enable needs Net.coord._.RUNNING;
+
+// R13-R14: Stop Phase Gating
+// Description: Motors can stop during shutdown or fault recovery
+// Rationale: Allows stopping during coordinated shutdown (STOPPING) or when
+//            recovering from faults (RECOVERING). Prevents direct stop from
+//            RUNNING without proper shutdown sequence
+requirement Net.NODE1._.c_stop needs
+    Net.coord._.STOPPING or Net.coord._.RECOVERING or Net.coord._.EMERGENCY;
+requirement Net.NODE2._.c_stop needs
+    Net.coord._.STOPPING or Net.coord._.RECOVERING or Net.coord._.EMERGENCY;
+
+// R15-R16: Recovery Phase Gating
+// Description: Recovery commands only during RECOVERING phase
+// Rationale: Ensures coordinated fault recovery protocol. Prevents recovery
+//            attempts during normal operation
+requirement Net.NODE1._.c_recover needs Net.coord._.RECOVERING;
+requirement Net.NODE2._.c_recover needs Net.coord._.RECOVERING;
+
+
+
+requirement Net.NODE1._.c_set_velocity needs Net.coord._.RUNNING;
+requirement Net.NODE2._.c_set_velocity needs Net.coord._.RUNNING;
+//==============================================================================
+// CATEGORY 3: HARDWARE CONSTRAINTS (2 requirements)
+//==============================================================================
+// Mutual exclusion for shared hardware resources (power supply, CAN bus).
+// Experimental setup uses single 12V PSU with limited current capacity.
+//==============================================================================
+
+// R17-R18: Sequential Calibration
+// Description: Only one node can calibrate at a time
+// Rationale: Calibration draws high current (1.5-2.5A). Simultaneous
+//            calibration would exceed PSU capacity. Sequential ensures
+//            reliable operation within hardware limits
+
+requirement Net.NODE1._.c_calibrate needs not Net.NODE2._.CALIBRATING;
+requirement Net.NODE2._.c_calibrate needs not Net.NODE1._.CALIBRATING;
+
+//==============================================================================
+// CATEGORY 4: SEQUENTIAL RECOVERY (1 requirement)
+//==============================================================================
+// Priority-based recovery sequencing to mitigate inrush current and prioritize
+// critical components. Supply fan (NODE1) has operational priority.
+//==============================================================================
+
+// R19: Supply Fan Priority in Recovery
+// Description: Exhaust fan waits until supply fan recovers
+// Rationale: Staggers power-on inrush current to avoid PSU overload.
+//            Supply fan prioritized as it provides positive building pressure
+requirement Net.NODE2._.c_recover needs not Net.NODE1._.FAULT;
+
+//==============================================================================
+// CATEGORY 5: COUNTER-BASED SAFETY (6 requirements)
+//==============================================================================
+// Prevent infinite retry loops by limiting attempts before escalating to
+// EMERGENCY. Each counter has application-tuned threshold.
+//==============================================================================
+
+// R20-R21: Calibration Attempt Limits
+// Description: Limit calibration retries to MAX_CAL attempts
+// Rationale: After MAX_CAL failures, calibration unlikely to succeed.
+//            Indicates persistent hardware issue (damaged sensor, bad winding)
+requirement Net.NODE1._.c_calibrate needs
+    Net.NODE1._.calibration_att_cnt < MAX_CAL;
+requirement Net.NODE2._.c_calibrate needs
+    Net.NODE2._.calibration_att_cnt < MAX_CAL;
+
+// R22-R23: Recovery Attempt Limits
+// Description: Limit recovery retries to MAX_RECOVERY attempts
+// Rationale: After MAX_RECOVERY failures, fault is persistent.
+//            Indicates hardware problem requiring technician intervention
+requirement Net.NODE1._.c_recover needs
+    Net.NODE1._.recovery_att_cnt < MAX_RECOVERY;
+requirement Net.NODE2._.c_recover needs
+    Net.NODE2._.recovery_att_cnt < MAX_RECOVERY;
+
+// R24-R25: Reboot Limits
+// Description: Limit system reboots to MAX_REBOOT attempts
+// Rationale: After MAX_REBOOT failures, initialization problem is persistent.
+//            Prevents infinite reboot loops on driver or firmware issues
+requirement Net.NODE1._.c_reboot needs
+    Net.NODE1._.reboot_cnt < MAX_REBOOT;
+requirement Net.NODE2._.c_reboot needs
+    Net.NODE2._.reboot_cnt < MAX_REBOOT;
+
+//==============================================================================
+// CATEGORY 6: HVAC SYNCHRONOUS OPERATION (2 requirements)
+//==============================================================================
+// Application-specific coordination policy for balanced ventilation.
+// Enforces synchronous operation: both fans run together or not at all.
+// Critical for building pressure balance and combustion safety.
+//==============================================================================
+
+// R26-R27: Cross-Node Health Dependency
+// Description: Each fan can only enable if other fan is healthy
+// Rationale: Prevents single-fan operation which causes pressure imbalance.
+//            Pressure imbalance risks backdrafting (combustion gases entering
+//            building). Both fans must be healthy before either can start
+requirement Net.NODE1._.c_enable needs
+    not Net.NODE2._.FAULT and
+    not Net.NODE2._.NO_POWER and
+    not Net.NODE2._.SETUP_ERROR and
+    not Net.NODE2._.CAL_FAILED;
+
+requirement Net.NODE2._.c_enable needs
+    not Net.NODE1._.FAULT and
+    not Net.NODE1._.NO_POWER and
+    not Net.NODE1._.SETUP_ERROR and
+    not Net.NODE1._.CAL_FAILED;
+
+//==============================================================================
+// CATEGORY 7: PREVENTIVE SAFETY (4 requirements)
+//==============================================================================
+// Block risky operations when counters approach limits. Provides safety margin
+// before hard EMERGENCY escalation. Prevents starting unstable system.
+//==============================================================================
+
+// R28-R29: Preventive Block on High Fault Count
+// Description: Block motor enable if any fault counter near limit
+// Rationale: If faults are frequent, system is unstable. Don't risk starting
+//            ventilation - wait for technician diagnosis
+requirement Net.NODE1._.c_enable needs
+    Net.NODE1._.fault_cnt < MAX_FAULTS and
+    Net.NODE2._.fault_cnt < MAX_FAULTS;
+
+requirement Net.NODE2._.c_enable needs
+    Net.NODE1._.fault_cnt < MAX_FAULTS and
+    Net.NODE2._.fault_cnt < MAX_FAULTS;
+
+// R30-R31: Preventive Block on High Power Cycle Count
+// Description: Block calibration if power cycle counter near limit
+// Rationale: High power cycling indicates PSU instability. Calibration draws
+//            high current and could trigger another power cycle. Block until
+//            power supply diagnosed
+requirement Net.NODE1._.c_calibrate needs
+    Net.NODE1._.power_cc_cnt < MAX_POWER;
+requirement Net.NODE2._.c_calibrate needs
+    Net.NODE2._.power_cc_cnt < MAX_POWER;
+
+
+
+requirement Net.NODE1._.c_cal_reject needs false;
+requirement Net.NODE2._.c_cal_reject needs false;
+
+
+//==============================================================================
+// SUMMARY: 31 Requirements Across 7 Categories
+//==============================================================================
+// Category 1: Coordinator Autonomous Transitions (8)
+// Category 2: Phase Gating (4)
+// Category 3: Hardware Constraints (2)
+// Category 4: Sequential Recovery (1)
+// Category 5: Counter-Based Safety (6)
+// Category 6: HVAC Synchronous Operation (2)
+// Category 7: Preventive Safety (4)
+//==============================================================================
+
+
+/*
+
+ **System Positioning**
+
+ **In Your Thesis/Paper:**
+
+Title: "Distributed BLDC Motor Control Network with Formal Supervisor Synthesis"
+
+Abstract snippet:
+"We present a scalable distributed control architecture for networked BLDC
+motors with formal safety guarantees. The system supports arbitrary N motors
+on a CAN bus with coordinated supervision. We demonstrate the approach on a
+dual-motor (N=2) balanced ventilation system (HRV/ERV), where coordinated
+control ensures pressure stability critical for building safety and indoor
+air quality."
+
+Contributions:
+1. General N-node architecture with CIF formal specification
+2. Autonomous fault recovery with counter-based safety limits
+3. Application-specific coordination policies (demonstrated: HVAC)
+4. Experimental validation on dual-motor ventilation system
+```
+
+ **In Presentations:**
+
+Slide 1: "Distributed Motor Control Network (General)"
+  - Scalable to N motors
+  - CAN bus communication
+  - Formal supervisor synthesis
+
+Slide 2: "Experimental Demonstration (N=2 HVAC)"
+  - Supply + Exhaust fans
+  - Balanced airflow requirement
+  - Safety-critical application
+
+Slide 3: "Requirements adapt to application"
+  - HVAC: Synchronous (both-or-nothing)
+  - Other: Independent, hierarchical, etc.
+
+  */
+
+
+
+//==============================================================================
+// CATEGORY 8: CONFLUENCE RESOLUTION (8 requirements)
+//==============================================================================
+//
+
+requirement Net.NODE1._.c_reboot needs Net.coord._.RECOVERING;
+requirement Net.NODE2._.c_reboot needs Net.coord._.RECOVERING;
+
+
+requirement Net.NODE1._.c_calibrate needs not (
+    (Net.NODE2._.FAULT or Net.NODE2._.SETUP_ERROR )or
+    (Net.NODE2._.NO_POWER)) or Net.coord._.RECOVERING;
+
+requirement Net.NODE2._.c_calibrate needs not (
+    (Net.NODE1._.FAULT or Net.NODE1._.SETUP_ERROR )or
+    (Net.NODE1._.NO_POWER)) or Net.coord._.RECOVERING;
+
+requirement Net.NODE1._.c_set_velocity needs not (
+    (Net.NODE2._.FAULT or Net.NODE2._.SETUP_ERROR )or
+    (Net.NODE2._.NO_POWER)) ;
+
+requirement Net.NODE2._.c_set_velocity needs not (
+    (Net.NODE1._.FAULT or Net.NODE1._.SETUP_ERROR )or
+    (Net.NODE1._.NO_POWER)) ;
+
+requirement  Net.NODE1._.c_reboot needs not LIMIT_EXHAUSTED and not Net.NODE2._.RUNNING and Net.NODE2._.IDLE ;
+requirement  Net.NODE1._.c_calibrate needs not LIMIT_EXHAUSTED;
+//requirement  Net.NODE1._.c_stop needs not LIMIT_EXHAUSTED;
+requirement  Net.NODE1._.c_recover needs not LIMIT_EXHAUSTED;
+
+requirement  Net.NODE2._.c_reboot needs not LIMIT_EXHAUSTED and not Net.NODE1._.RUNNING and Net.NODE1._.IDLE;
+requirement  Net.NODE2._.c_calibrate needs not LIMIT_EXHAUSTED;
+//requirement  Net.NODE2._.c_stop needs not LIMIT_EXHAUSTED;
+requirement Net.NODE2._.c_recover needs not LIMIT_EXHAUSTED;
+
+requirement Net.NODE2._.c_calibrate needs
+    not Net.NODE1._.NEEDS_RECAL and
+    not Net.NODE1._.CAL_FAILED;
+

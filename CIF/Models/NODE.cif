@@ -1,0 +1,312 @@
+//==============================================================================
+// DRV8302 BLDC Motor Node - Formal Model
+//==============================================================================
+//
+// HARDWARE: 7-pole BLDC, DRV8302 driver, Teensy 4.0, SimpleFOC
+// FAULTS: ELECTRICAL (nFAULT=0,nOCTW=1), THERMAL (nFAULT=0,nOCTW=0), NO_POWER (PWRGD=0)
+// RECOVERY: Electrical EN_GATE reset, Thermal -> passive cooling, Power -> restore+recover
+//
+//==============================================================================
+
+enum FaultReason = NONE, ELECTRICAL, THERMAL, POWER_RESTORE;
+
+plant def DRV8302_motor_node(uncontrollable u_technician_reset; alg int [0..300] tar_vel):
+
+    const int MAX_RANGE = 10;
+
+    //==========================================================================
+    // COUNTERS (Supervisor-visible safety metrics)
+    //==========================================================================
+    // Increment: min(counter+1, MAX_RANGE) - saturating arithmetic
+    // Reset: Successful calibration (all operational) or reboot (all)
+
+    disc int[0..MAX_RANGE] fault_cnt = 0,              // u_fault, u_overheated (total faults)
+                               power_cc_cnt = 0,        // u_no_power        (total power cycles)
+                               recovery_att_cnt = 0,   // u_recover_failed  (consecutive recoveries)
+                               calibration_att_cnt = 0,// u_cal_failed      (consecutive calibrations)
+                               reboot_cnt = 0;         // c_reboot          (consecutive reboots)
+    //==========================================================================
+    // RUNTIME STATE
+    //==========================================================================
+
+    disc int[0..300] cur_vel = 0;  // Velocity setpoint and actual
+    disc bool rec_flag = true;                 // Recovery protocol (alternating cmd/rsp)
+    disc FaultReason fault_reason = NONE;      // Why we're in FAULT (determines recovery path)
+
+    //==========================================================================
+    // EVENTS
+    //==========================================================================
+
+    // Controllable (supervisor commands)
+    controllable c_calibrate, c_enable, c_stop, c_recover, c_cal_reject, c_reboot, c_set_velocity;
+
+    // Uncontrollable (hardware events)
+    uncontrollable u_setup_ok, u_setup_error;
+    uncontrollable u_cal_success, u_cal_failed;
+    uncontrollable u_fault, u_overheated, u_cooled, u_fault_cleared, u_recover_failed;
+    uncontrollable u_no_power, u_power_restore;
+    uncontrollable u_stopped;
+
+    //==========================================================================
+    // STATE MACHINE
+    //==========================================================================
+    // INIT: Hardware initialization (driver, motor, current sense)
+    location INIT:
+        initial; marked;
+        edge u_setup_ok do reboot_cnt := 0 goto NEEDS_RECAL;
+        edge u_setup_error goto SETUP_ERROR;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE)
+            goto NO_POWER;
+
+        // Technician reset from INIT - go to safe state
+        edge u_technician_reset ;
+
+    // SETUP_ERROR: Init failed - wait for reboot
+    location SETUP_ERROR:
+        marked;
+        edge c_reboot do
+            reboot_cnt := min(reboot_cnt + 1, MAX_RANGE)
+            goto INIT;
+
+        // Technician reset from SETUP_ERROR - clear counters and recover
+        edge u_technician_reset do
+            fault_cnt := 0,
+            recovery_att_cnt := 0,
+            calibration_att_cnt := 0,
+            power_cc_cnt := 0,
+            reboot_cnt := 0;
+
+    // NEEDS_RECAL: Motor uncalibrated - parameters unknown
+    location NEEDS_RECAL:
+        marked;
+        edge c_calibrate goto CALIBRATING;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE)
+            goto NO_POWER;
+        // Technician reset from NEEDS_RECAL - no-op (already safe state)
+        edge u_technician_reset do
+            fault_cnt := 0,
+            recovery_att_cnt := 0,
+            calibration_att_cnt := 0,
+            power_cc_cnt := 0,
+            reboot_cnt := 0;
+    // CALIBRATING: Measuring R, L parameters (~10-15sec)
+    location CALIBRATING:
+        edge u_cal_success do
+            calibration_att_cnt := 0
+            goto IDLE;
+        edge u_cal_failed do
+            calibration_att_cnt := min(calibration_att_cnt + 1, MAX_RANGE)
+            goto CAL_FAILED;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE)
+            goto NO_POWER;
+        edge u_technician_reset;
+
+    // CAL_FAILED: Calibration failed - retry or abandon
+    location CAL_FAILED:
+        marked;
+        edge c_calibrate goto CALIBRATING;
+        edge c_cal_reject goto NEEDS_RECAL;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE)
+            goto NO_POWER;
+
+        // Technician reset from CAL_FAILED - clear counters and recover
+        edge u_technician_reset do
+            fault_cnt := 0,
+            recovery_att_cnt := 0,
+            calibration_att_cnt := 0,
+            power_cc_cnt := 0,
+            reboot_cnt := 0;
+    // IDLE: Calibrated, motor disabled, ready for operation
+    location IDLE:
+        marked;
+        edge c_enable goto RUNNING;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE)
+            goto NO_POWER;
+
+        // Technician reset from IDLE - no-op (already safe state)
+        edge u_technician_reset;
+
+    // RUNNING: FOC active, motor spinning
+    location RUNNING:
+        edge c_set_velocity when cur_vel != tar_vel do cur_vel := tar_vel;
+        edge c_stop goto STOPPING;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            cur_vel := 0,
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            cur_vel := 0,
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE),
+            cur_vel := 0
+            goto NO_POWER;
+
+        // Technician reset from RUNNING - stop motor, reset counters
+        edge u_technician_reset;
+
+    // STOPPING: Controlled deceleration (exponential decay)
+    location STOPPING:
+        edge u_stopped do cur_vel := 0 goto IDLE;
+        edge c_enable goto RUNNING;
+        edge u_fault do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            cur_vel := 0,
+            fault_reason := ELECTRICAL
+            goto FAULT;
+        edge u_overheated do
+            fault_cnt := min(fault_cnt + 1, MAX_RANGE),
+            cur_vel := 0,
+            fault_reason := THERMAL
+            goto FAULT;
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE),
+            cur_vel := 0
+            goto NO_POWER;
+
+        // Technician reset from STOPPING - abort stop, reset counters
+        edge u_technician_reset ;
+
+    // FAULT: Hardware fault - type-specific recovery required
+    // rec_flag alternates: c_recover sets false, responses set true
+    location FAULT:
+        marked;
+
+        edge c_recover when rec_flag do
+            rec_flag := not rec_flag
+            goto FAULT;
+
+        edge u_recover_failed when not rec_flag do
+            recovery_att_cnt := min(recovery_att_cnt + 1, MAX_RANGE),
+            rec_flag := not rec_flag
+            goto FAULT;
+
+        // Thermal fault cleared (only fires when fault_reason = THERMAL)
+        edge u_cooled when fault_reason = THERMAL do
+            recovery_att_cnt := 0,
+            fault_reason := NONE,
+            rec_flag := true
+            goto NEEDS_RECAL;
+
+        // Electrical fault cleared (fires when ELECTRICAL or POWER_RESTORE)
+        edge u_fault_cleared when (fault_reason = ELECTRICAL or fault_reason = POWER_RESTORE) do
+            recovery_att_cnt := 0,
+            fault_reason := NONE,
+            rec_flag := true
+            goto NEEDS_RECAL;
+
+        edge u_no_power do
+            power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE),
+            rec_flag := true,
+            fault_reason := NONE
+            goto NO_POWER;
+
+        // Technician reset from FAULT - full counter reset and recover
+        edge u_technician_reset do
+            fault_cnt := 0,
+            recovery_att_cnt := 0,
+            calibration_att_cnt := 0,
+            power_cc_cnt := 0,
+            reboot_cnt := 0;
+
+    // NO_POWER: Power supply lost - wait for restore
+    location NO_POWER:
+        marked;
+        edge u_power_restore do
+            fault_reason := POWER_RESTORE
+            goto FAULT;
+        edge u_technician_reset;
+end
+
+//==============================================================================
+// INPUT CAN GROUP
+//==============================================================================
+
+ // Input group definition
+ group def CAN_IF():
+     // Event flags from CAN node
+     input bool Evt_setup_ok      , Evt_setup_error;
+     input bool Evt_cal_success   , Evt_cal_failed;
+     input bool Evt_stopped       , Evt_fault;
+     input bool Evt_no_power      , Evt_power_restored;
+     input bool Evt_overheated    , Evt_cooled;
+     input bool Evt_fault_cleared , Evt_recover_failed;
+ end
+
+ //==============================================================================
+// NODE GROUP DEFINITION
+//==============================================================================
+//
+// Wraps the motor node plant for network instantiation.
+// node_id is algebraic parameter (compile-time constant) for CAN addressing.
+//
+
+
+group  def  NODE(alg int [1..254] node_id ; uncontrollable u_technician_reset ; alg int [0..300] tar_vel):
+       _: DRV8302_motor_node(u_technician_reset, tar_vel);
+     CAN: CAN_IF();
+        // Plant invariants linking events to input flags
+     plant invariant _.u_setup_ok         needs CAN.Evt_setup_ok;
+     plant invariant _.u_setup_error      needs CAN.Evt_setup_error;
+     plant invariant _.u_cal_success      needs CAN.Evt_cal_success;
+     plant invariant _.u_cal_failed       needs CAN.Evt_cal_failed;
+     plant invariant _.u_stopped          needs CAN.Evt_stopped;
+     plant invariant _.u_fault            needs CAN.Evt_fault;
+     plant invariant _.u_no_power         needs CAN.Evt_no_power;
+     plant invariant _.u_power_restore    needs (CAN.Evt_power_restored and not CAN.Evt_no_power);
+     plant invariant _.u_overheated       needs CAN.Evt_overheated;
+     plant invariant _.u_cooled           needs CAN.Evt_cooled          and not CAN.Evt_overheated;
+     plant invariant _.u_fault_cleared    needs CAN.Evt_fault_cleared   and not CAN.Evt_fault;
+     plant invariant _.u_recover_failed   needs CAN.Evt_recover_failed;
+// UNCOMMENT FOR DEPLOYMENT
+end
+
+

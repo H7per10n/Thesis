@@ -1,0 +1,7 @@
+
+from "lib:cif" import *;
+import java.lang.System.gc;
+gc();
+cifcodegen("Synth/output_NET.cif -o gen/ -l c99 -p NET --devmode=TRUE");
+
+

@@ -1,0 +1,406 @@
+@@controller:properties(boundedResponse: true, uncontrollablesBound: 2, controllablesBound: 2, confluence: true)
+const int[5..5] MAX_FAULTS = 5;
+const int[3..3] MAX_POWER = 3;
+const int[3..3] MAX_CAL = 3;
+const int[3..3] MAX_RECOVERY = 3;
+const int[3..3] MAX_REBOOT = 3;
+alg bool LIMIT_EXHAUSTED = Net.NODE1._.fault_cnt >= MAX_FAULTS or Net.NODE1._.power_cc_cnt >= MAX_POWER or Net.NODE1._.recovery_att_cnt >= MAX_RECOVERY or Net.NODE1._.calibration_att_cnt >= MAX_CAL or Net.NODE1._.reboot_cnt >= MAX_REBOOT or Net.NODE2._.fault_cnt >= MAX_FAULTS or Net.NODE2._.power_cc_cnt >= MAX_POWER or Net.NODE2._.recovery_att_cnt >= MAX_RECOVERY or Net.NODE2._.calibration_att_cnt >= MAX_CAL or Net.NODE2._.reboot_cnt >= MAX_REBOOT;
+enum FaultReason = NONE, ELECTRICAL, THERMAL, POWER_RESTORE;
+group Net:
+  group coord:
+    plant automaton _:
+      uncontrollable u_start;
+      uncontrollable u_stop;
+      uncontrollable u_technician_reset;
+      controllable c_nodes_ready;
+      controllable c_all_calibrated;
+      controllable c_all_stopped;
+      controllable c_node_unhealthy;
+      controllable c_all_healthy;
+      controllable c_limits_exceeded;
+      controllable c_all_power_lost;
+      controllable c_power_restored;
+      disc int[0..300] velocity = 1;
+      location IDLE:
+        initial;
+        marked;
+        edge u_start goto BOOTING;
+        edge c_all_power_lost goto NO_POWER;
+      location BOOTING:
+        edge c_nodes_ready goto CALIBRATING;
+        edge c_node_unhealthy goto RECOVERING;
+        edge c_limits_exceeded goto EMERGENCY;
+        edge u_stop goto IDLE;
+        edge c_all_power_lost goto NO_POWER;
+      location CALIBRATING:
+        edge c_all_calibrated goto RUNNING;
+        edge c_node_unhealthy goto RECOVERING;
+        edge c_limits_exceeded goto EMERGENCY;
+        edge u_stop goto STOPPING;
+        edge c_all_power_lost goto NO_POWER;
+      location RUNNING:
+        marked;
+        edge c_node_unhealthy goto RECOVERING;
+        edge u_stop goto STOPPING;
+        edge c_all_power_lost goto NO_POWER;
+      location STOPPING:
+        edge c_all_stopped goto IDLE;
+        edge c_node_unhealthy goto RECOVERING;
+        edge c_all_power_lost goto NO_POWER;
+      location RECOVERING:
+        marked;
+        edge c_all_healthy goto BOOTING;
+        edge c_limits_exceeded goto EMERGENCY;
+        edge c_all_power_lost goto NO_POWER;
+      location EMERGENCY:
+        marked;
+        edge u_technician_reset goto BOOTING;
+        edge c_all_power_lost goto NO_POWER;
+      location NO_POWER:
+        marked;
+        edge c_power_restored goto RECOVERING;
+    end
+    group HMI:
+      input bool _u_start;
+      input bool _u_stop;
+      input bool _u_technician_reset;
+    end
+    plant invariant _.u_start needs HMI._u_start and not HMI._u_stop;
+    plant invariant _.u_stop needs HMI._u_stop and not HMI._u_start;
+    plant invariant _.u_technician_reset needs HMI._u_technician_reset;
+  end
+  group NODE1:
+    alg int[1..254] node_id = 1;
+    alg int[0..300] tar_vel = coord._.velocity;
+    plant automaton _:
+      const int[10..10] MAX_RANGE = 10;
+      disc int[0..10] fault_cnt = 0;
+      disc int[0..10] power_cc_cnt = 0;
+      disc int[0..10] recovery_att_cnt = 0;
+      disc int[0..10] calibration_att_cnt = 0;
+      disc int[0..10] reboot_cnt = 0;
+      disc int[0..300] cur_vel = 0;
+      disc bool rec_flag = true;
+      disc FaultReason fault_reason = NONE;
+      controllable c_calibrate;
+      controllable c_enable;
+      controllable c_stop;
+      controllable c_recover;
+      controllable c_cal_reject;
+      controllable c_reboot;
+      controllable c_set_velocity;
+      uncontrollable u_setup_ok;
+      uncontrollable u_setup_error;
+      uncontrollable u_cal_success;
+      uncontrollable u_cal_failed;
+      uncontrollable u_fault;
+      uncontrollable u_overheated;
+      uncontrollable u_cooled;
+      uncontrollable u_fault_cleared;
+      uncontrollable u_recover_failed;
+      uncontrollable u_no_power;
+      uncontrollable u_power_restore;
+      uncontrollable u_stopped;
+      alg int[0..300] tar_vel = .Net.NODE1.tar_vel;
+      location INIT:
+        initial;
+        marked;
+        edge u_setup_ok do reboot_cnt := 0 goto NEEDS_RECAL;
+        edge u_setup_error goto SETUP_ERROR;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location SETUP_ERROR:
+        marked;
+        edge c_reboot do reboot_cnt := min(reboot_cnt + 1, MAX_RANGE) goto INIT;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location NEEDS_RECAL:
+        marked;
+        edge c_calibrate goto CALIBRATING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location CALIBRATING:
+        edge u_cal_success do calibration_att_cnt := 0 goto IDLE;
+        edge u_cal_failed do calibration_att_cnt := min(calibration_att_cnt + 1, MAX_RANGE) goto CAL_FAILED;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location CAL_FAILED:
+        marked;
+        edge c_calibrate goto CALIBRATING;
+        edge c_cal_reject goto NEEDS_RECAL;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location IDLE:
+        marked;
+        edge c_enable goto RUNNING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location RUNNING:
+        edge c_set_velocity when cur_vel != tar_vel do cur_vel := tar_vel;
+        edge c_stop goto STOPPING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE), cur_vel := 0 goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location STOPPING:
+        edge u_stopped do cur_vel := 0 goto IDLE;
+        edge c_enable goto RUNNING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE), cur_vel := 0 goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location FAULT:
+        marked;
+        edge c_recover when rec_flag do rec_flag := not rec_flag goto FAULT;
+        edge u_recover_failed when not rec_flag do recovery_att_cnt := min(recovery_att_cnt + 1, MAX_RANGE), rec_flag := not rec_flag goto FAULT;
+        edge u_cooled when fault_reason = THERMAL do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
+        edge u_fault_cleared when fault_reason = ELECTRICAL or fault_reason = POWER_RESTORE do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE), rec_flag := true, fault_reason := NONE goto NO_POWER;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location NO_POWER:
+        marked;
+        edge u_power_restore do fault_reason := POWER_RESTORE goto FAULT;
+        edge coord._.u_technician_reset;
+    end
+    group CAN:
+      input bool Evt_setup_ok;
+      input bool Evt_setup_error;
+      input bool Evt_cal_success;
+      input bool Evt_cal_failed;
+      input bool Evt_stopped;
+      input bool Evt_fault;
+      input bool Evt_no_power;
+      input bool Evt_power_restored;
+      input bool Evt_overheated;
+      input bool Evt_cooled;
+      input bool Evt_fault_cleared;
+      input bool Evt_recover_failed;
+    end
+    plant invariant _.u_setup_ok needs CAN.Evt_setup_ok;
+    plant invariant _.u_setup_error needs CAN.Evt_setup_error;
+    plant invariant _.u_cal_success needs CAN.Evt_cal_success;
+    plant invariant _.u_cal_failed needs CAN.Evt_cal_failed;
+    plant invariant _.u_stopped needs CAN.Evt_stopped;
+    plant invariant _.u_fault needs CAN.Evt_fault;
+    plant invariant _.u_no_power needs CAN.Evt_no_power;
+    plant invariant _.u_power_restore needs CAN.Evt_power_restored and not CAN.Evt_no_power;
+    plant invariant _.u_overheated needs CAN.Evt_overheated;
+    plant invariant _.u_cooled needs CAN.Evt_cooled and not CAN.Evt_overheated;
+    plant invariant _.u_fault_cleared needs CAN.Evt_fault_cleared and not CAN.Evt_fault;
+    plant invariant _.u_recover_failed needs CAN.Evt_recover_failed;
+  end
+  group NODE2:
+    alg int[1..254] node_id = 2;
+    alg int[0..300] tar_vel = coord._.velocity;
+    plant automaton _:
+      const int[10..10] MAX_RANGE = 10;
+      disc int[0..10] fault_cnt = 0;
+      disc int[0..10] power_cc_cnt = 0;
+      disc int[0..10] recovery_att_cnt = 0;
+      disc int[0..10] calibration_att_cnt = 0;
+      disc int[0..10] reboot_cnt = 0;
+      disc int[0..300] cur_vel = 0;
+      disc bool rec_flag = true;
+      disc FaultReason fault_reason = NONE;
+      controllable c_calibrate;
+      controllable c_enable;
+      controllable c_stop;
+      controllable c_recover;
+      controllable c_cal_reject;
+      controllable c_reboot;
+      controllable c_set_velocity;
+      uncontrollable u_setup_ok;
+      uncontrollable u_setup_error;
+      uncontrollable u_cal_success;
+      uncontrollable u_cal_failed;
+      uncontrollable u_fault;
+      uncontrollable u_overheated;
+      uncontrollable u_cooled;
+      uncontrollable u_fault_cleared;
+      uncontrollable u_recover_failed;
+      uncontrollable u_no_power;
+      uncontrollable u_power_restore;
+      uncontrollable u_stopped;
+      alg int[0..300] tar_vel = .Net.NODE2.tar_vel;
+      location INIT:
+        initial;
+        marked;
+        edge u_setup_ok do reboot_cnt := 0 goto NEEDS_RECAL;
+        edge u_setup_error goto SETUP_ERROR;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location SETUP_ERROR:
+        marked;
+        edge c_reboot do reboot_cnt := min(reboot_cnt + 1, MAX_RANGE) goto INIT;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location NEEDS_RECAL:
+        marked;
+        edge c_calibrate goto CALIBRATING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location CALIBRATING:
+        edge u_cal_success do calibration_att_cnt := 0 goto IDLE;
+        edge u_cal_failed do calibration_att_cnt := min(calibration_att_cnt + 1, MAX_RANGE) goto CAL_FAILED;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location CAL_FAILED:
+        marked;
+        edge c_calibrate goto CALIBRATING;
+        edge c_cal_reject goto NEEDS_RECAL;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location IDLE:
+        marked;
+        edge c_enable goto RUNNING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE) goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location RUNNING:
+        edge c_set_velocity when cur_vel != tar_vel do cur_vel := tar_vel;
+        edge c_stop goto STOPPING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE), cur_vel := 0 goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location STOPPING:
+        edge u_stopped do cur_vel := 0 goto IDLE;
+        edge c_enable goto RUNNING;
+        edge u_fault do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := ELECTRICAL goto FAULT;
+        edge u_overheated do fault_cnt := min(fault_cnt + 1, MAX_RANGE), cur_vel := 0, fault_reason := THERMAL goto FAULT;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE), cur_vel := 0 goto NO_POWER;
+        edge coord._.u_technician_reset;
+      location FAULT:
+        marked;
+        edge c_recover when rec_flag do rec_flag := not rec_flag goto FAULT;
+        edge u_recover_failed when not rec_flag do recovery_att_cnt := min(recovery_att_cnt + 1, MAX_RANGE), rec_flag := not rec_flag goto FAULT;
+        edge u_cooled when fault_reason = THERMAL do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
+        edge u_fault_cleared when fault_reason = ELECTRICAL or fault_reason = POWER_RESTORE do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
+        edge u_no_power do power_cc_cnt := min(power_cc_cnt + 1, MAX_RANGE), rec_flag := true, fault_reason := NONE goto NO_POWER;
+        edge coord._.u_technician_reset do fault_cnt := 0, recovery_att_cnt := 0, calibration_att_cnt := 0, power_cc_cnt := 0, reboot_cnt := 0;
+      location NO_POWER:
+        marked;
+        edge u_power_restore do fault_reason := POWER_RESTORE goto FAULT;
+        edge coord._.u_technician_reset;
+    end
+    group CAN:
+      input bool Evt_setup_ok;
+      input bool Evt_setup_error;
+      input bool Evt_cal_success;
+      input bool Evt_cal_failed;
+      input bool Evt_stopped;
+      input bool Evt_fault;
+      input bool Evt_no_power;
+      input bool Evt_power_restored;
+      input bool Evt_overheated;
+      input bool Evt_cooled;
+      input bool Evt_fault_cleared;
+      input bool Evt_recover_failed;
+    end
+    plant invariant _.u_setup_ok needs CAN.Evt_setup_ok;
+    plant invariant _.u_setup_error needs CAN.Evt_setup_error;
+    plant invariant _.u_cal_success needs CAN.Evt_cal_success;
+    plant invariant _.u_cal_failed needs CAN.Evt_cal_failed;
+    plant invariant _.u_stopped needs CAN.Evt_stopped;
+    plant invariant _.u_fault needs CAN.Evt_fault;
+    plant invariant _.u_no_power needs CAN.Evt_no_power;
+    plant invariant _.u_power_restore needs CAN.Evt_power_restored and not CAN.Evt_no_power;
+    plant invariant _.u_overheated needs CAN.Evt_overheated;
+    plant invariant _.u_cooled needs CAN.Evt_cooled and not CAN.Evt_overheated;
+    plant invariant _.u_fault_cleared needs CAN.Evt_fault_cleared and not CAN.Evt_fault;
+    plant invariant _.u_recover_failed needs CAN.Evt_recover_failed;
+  end
+end
+supervisor automaton sup:
+  alphabet Net.coord._.c_all_power_lost, Net.coord._.c_nodes_ready, Net.coord._.c_node_unhealthy, Net.coord._.c_limits_exceeded, Net.coord._.c_all_calibrated, Net.coord._.c_all_stopped, Net.coord._.c_all_healthy, Net.coord._.c_power_restored, Net.NODE1._.c_reboot, Net.NODE1._.c_calibrate, Net.NODE1._.c_cal_reject, Net.NODE1._.c_enable, Net.NODE1._.c_set_velocity, Net.NODE1._.c_stop, Net.NODE1._.c_recover, Net.NODE2._.c_reboot, Net.NODE2._.c_calibrate, Net.NODE2._.c_cal_reject, Net.NODE2._.c_enable, Net.NODE2._.c_set_velocity, Net.NODE2._.c_stop, Net.NODE2._.c_recover;
+  location:
+    initial;
+    marked;
+    edge Net.coord._.c_all_calibrated when true;
+    edge Net.coord._.c_all_healthy when true;
+    edge Net.coord._.c_all_power_lost when true;
+    edge Net.coord._.c_all_stopped when true;
+    edge Net.coord._.c_limits_exceeded when true;
+    edge Net.coord._.c_node_unhealthy when true;
+    edge Net.coord._.c_nodes_ready when true;
+    edge Net.coord._.c_power_restored when true;
+    edge Net.NODE1._.c_cal_reject when true;
+    edge Net.NODE1._.c_calibrate when true;
+    edge Net.NODE1._.c_enable when true;
+    edge Net.NODE1._.c_reboot when true;
+    edge Net.NODE1._.c_recover when true;
+    edge Net.NODE1._.c_set_velocity when true;
+    edge Net.NODE1._.c_stop when true;
+    edge Net.NODE2._.c_cal_reject when true;
+    edge Net.NODE2._.c_calibrate when true;
+    edge Net.NODE2._.c_enable when true;
+    edge Net.NODE2._.c_reboot when true;
+    edge Net.NODE2._.c_recover when true;
+    edge Net.NODE2._.c_set_velocity when true;
+    edge Net.NODE2._.c_stop when true;
+end
+supervisor invariant Net.coord._.c_nodes_ready needs (Net.NODE1._.NEEDS_RECAL or Net.NODE1._.IDLE or Net.NODE1._.CAL_FAILED) and (Net.NODE2._.NEEDS_RECAL or Net.NODE2._.IDLE or Net.NODE2._.CAL_FAILED);
+supervisor invariant Net.coord._.c_all_calibrated needs Net.NODE1._.IDLE and Net.NODE2._.IDLE and not LIMIT_EXHAUSTED;
+supervisor invariant Net.coord._.c_all_stopped needs Net.coord._.STOPPING and (Net.NODE1._.IDLE or Net.NODE1._.NEEDS_RECAL) and (Net.NODE2._.IDLE or Net.NODE2._.NEEDS_RECAL);
+supervisor invariant Net.coord._.c_node_unhealthy needs Net.NODE1._.FAULT or Net.NODE1._.SETUP_ERROR or (Net.NODE2._.FAULT or Net.NODE2._.SETUP_ERROR) or Net.NODE1._.NO_POWER and not Net.NODE2._.NO_POWER or Net.NODE2._.NO_POWER and not Net.NODE1._.NO_POWER;
+supervisor invariant Net.coord._.c_all_healthy needs Net.coord._.RECOVERING and (Net.NODE1._.IDLE or Net.NODE1._.NEEDS_RECAL) and (Net.NODE2._.IDLE or Net.NODE2._.NEEDS_RECAL);
+supervisor invariant Net.coord._.c_limits_exceeded needs LIMIT_EXHAUSTED;
+supervisor invariant Net.coord._.c_all_power_lost needs Net.NODE1._.NO_POWER and Net.NODE2._.NO_POWER;
+supervisor invariant Net.coord._.c_power_restored needs Net.coord._.NO_POWER and not Net.NODE1._.NO_POWER and not Net.NODE2._.NO_POWER;
+supervisor invariant Net.NODE1._.c_calibrate needs Net.coord._.CALIBRATING;
+supervisor invariant Net.NODE2._.c_calibrate needs Net.coord._.CALIBRATING;
+supervisor invariant Net.NODE1._.c_enable needs Net.coord._.RUNNING;
+supervisor invariant Net.NODE2._.c_enable needs Net.coord._.RUNNING;
+supervisor invariant Net.NODE1._.c_stop needs Net.coord._.STOPPING or Net.coord._.RECOVERING or Net.coord._.EMERGENCY;
+supervisor invariant Net.NODE2._.c_stop needs Net.coord._.STOPPING or Net.coord._.RECOVERING or Net.coord._.EMERGENCY;
+supervisor invariant Net.NODE1._.c_recover needs Net.coord._.RECOVERING;
+supervisor invariant Net.NODE2._.c_recover needs Net.coord._.RECOVERING;
+supervisor invariant Net.NODE1._.c_set_velocity needs Net.coord._.RUNNING;
+supervisor invariant Net.NODE2._.c_set_velocity needs Net.coord._.RUNNING;
+supervisor invariant Net.NODE1._.c_calibrate needs not Net.NODE2._.CALIBRATING;
+supervisor invariant Net.NODE2._.c_calibrate needs not Net.NODE1._.CALIBRATING;
+supervisor invariant Net.NODE2._.c_recover needs not Net.NODE1._.FAULT;
+supervisor invariant Net.NODE1._.c_calibrate needs Net.NODE1._.calibration_att_cnt < MAX_CAL;
+supervisor invariant Net.NODE2._.c_calibrate needs Net.NODE2._.calibration_att_cnt < MAX_CAL;
+supervisor invariant Net.NODE1._.c_recover needs Net.NODE1._.recovery_att_cnt < MAX_RECOVERY;
+supervisor invariant Net.NODE2._.c_recover needs Net.NODE2._.recovery_att_cnt < MAX_RECOVERY;
+supervisor invariant Net.NODE1._.c_reboot needs Net.NODE1._.reboot_cnt < MAX_REBOOT;
+supervisor invariant Net.NODE2._.c_reboot needs Net.NODE2._.reboot_cnt < MAX_REBOOT;
+supervisor invariant Net.NODE1._.c_enable needs not Net.NODE2._.FAULT and not Net.NODE2._.NO_POWER and not Net.NODE2._.SETUP_ERROR and not Net.NODE2._.CAL_FAILED;
+supervisor invariant Net.NODE2._.c_enable needs not Net.NODE1._.FAULT and not Net.NODE1._.NO_POWER and not Net.NODE1._.SETUP_ERROR and not Net.NODE1._.CAL_FAILED;
+supervisor invariant Net.NODE1._.c_enable needs Net.NODE1._.fault_cnt < MAX_FAULTS and Net.NODE2._.fault_cnt < MAX_FAULTS;
+supervisor invariant Net.NODE2._.c_enable needs Net.NODE1._.fault_cnt < MAX_FAULTS and Net.NODE2._.fault_cnt < MAX_FAULTS;
+supervisor invariant Net.NODE1._.c_calibrate needs Net.NODE1._.power_cc_cnt < MAX_POWER;
+supervisor invariant Net.NODE2._.c_calibrate needs Net.NODE2._.power_cc_cnt < MAX_POWER;
+supervisor invariant Net.NODE1._.c_cal_reject needs false;
+supervisor invariant Net.NODE2._.c_cal_reject needs false;
+supervisor invariant Net.NODE1._.c_reboot needs Net.coord._.RECOVERING;
+supervisor invariant Net.NODE2._.c_reboot needs Net.coord._.RECOVERING;
+supervisor invariant Net.NODE1._.c_calibrate needs not(Net.NODE2._.FAULT or Net.NODE2._.SETUP_ERROR or Net.NODE2._.NO_POWER) or Net.coord._.RECOVERING;
+supervisor invariant Net.NODE2._.c_calibrate needs not(Net.NODE1._.FAULT or Net.NODE1._.SETUP_ERROR or Net.NODE1._.NO_POWER) or Net.coord._.RECOVERING;
+supervisor invariant Net.NODE1._.c_set_velocity needs not(Net.NODE2._.FAULT or Net.NODE2._.SETUP_ERROR or Net.NODE2._.NO_POWER);
+supervisor invariant Net.NODE2._.c_set_velocity needs not(Net.NODE1._.FAULT or Net.NODE1._.SETUP_ERROR or Net.NODE1._.NO_POWER);
+supervisor invariant Net.NODE1._.c_reboot needs not LIMIT_EXHAUSTED and not Net.NODE2._.RUNNING and Net.NODE2._.IDLE;
+supervisor invariant Net.NODE1._.c_calibrate needs not LIMIT_EXHAUSTED;
+supervisor invariant Net.NODE1._.c_recover needs not LIMIT_EXHAUSTED;
+supervisor invariant Net.NODE2._.c_reboot needs not LIMIT_EXHAUSTED and not Net.NODE1._.RUNNING and Net.NODE1._.IDLE;
+supervisor invariant Net.NODE2._.c_calibrate needs not LIMIT_EXHAUSTED;
+supervisor invariant Net.NODE2._.c_recover needs not LIMIT_EXHAUSTED;
+supervisor invariant Net.NODE2._.c_calibrate needs not Net.NODE1._.NEEDS_RECAL and not Net.NODE1._.CAL_FAILED;
