@@ -19,6 +19,9 @@
 #include "NET_engine.h"
 #include "net_tui.h"
 
+
+#define CONTROL_CYCLE 10e3 // 10000us , 10ms
+
 /* ── globals ──────────────────────────────────────────────────── */
 static volatile sig_atomic_t sig_quit = 0;
 static uint64_t start_us = 0;
@@ -128,7 +131,7 @@ void NET_PrintOutput(const char *text, const char *fname) {
 /* ── main ─────────────────────────────────────────────────────── */
 int main(void) {
     start_us = monotonic_us();
-
+	uint32_t delayer_cnt =1;
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handle_sigint;
@@ -147,9 +150,7 @@ int main(void) {
     tui_init();
     NET_EngineFirstStep();
     tui_draw(monotonic_us() - start_us);
-
-    const uint64_t TICK_US = 50000;
-
+    
     while (!hmi_quit && !sig_quit) {
         uint64_t tick_start = monotonic_us();
 
@@ -179,13 +180,19 @@ int main(void) {
         uint64_t cyc0 = monotonic_us();
         NET_EngineTimeStep(0.1);
         tui_set_cycle_us(monotonic_us() - cyc0);
-
+		delayer_cnt++;
+		//recover delay
+		if (delayer_cnt >= 100) {
+			Net_NODE1___delay_passed_ = TRUE;
+			delayer_cnt = 0;
+		} else {
+			Net_NODE1___delay_passed_ = FALSE;
+		}
         tui_draw(monotonic_us() - start_us);
-
+        
         if (hmi_quit && Net_coord___ == _NET_IDLE) break;
-
         uint64_t elapsed = monotonic_us() - tick_start;
-        if (elapsed < TICK_US) usleep((unsigned int)(TICK_US - elapsed));
+        if (elapsed < CONTROL_CYCLE) usleep((unsigned int)(CONTROL_CYCLE - elapsed));
     }
 
     /* graceful stop */

@@ -1,4 +1,3 @@
-@@controller:properties(boundedResponse: true, uncontrollablesBound: 2, controllablesBound: 2, confluence: true)
 const int[5..5] MAX_FAULTS = 5;
 const int[3..3] MAX_POWER = 3;
 const int[3..3] MAX_CAL = 3;
@@ -81,6 +80,7 @@ group Net:
       disc int[0..10] reboot_cnt = 0;
       disc int[0..300] cur_vel = 0;
       disc bool rec_flag = true;
+      disc bool delay_passed = true;
       disc FaultReason fault_reason = NONE;
       controllable c_calibrate;
       controllable c_enable;
@@ -160,7 +160,7 @@ group Net:
         edge coord._.u_technician_reset;
       location FAULT:
         marked;
-        edge c_recover when rec_flag do rec_flag := not rec_flag goto FAULT;
+        edge c_recover when rec_flag and delay_passed do rec_flag := not rec_flag goto FAULT;
         edge u_recover_failed when not rec_flag do recovery_att_cnt := min(recovery_att_cnt + 1, MAX_RANGE), rec_flag := not rec_flag goto FAULT;
         edge u_cooled when fault_reason = THERMAL do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
         edge u_fault_cleared when fault_reason = ELECTRICAL or fault_reason = POWER_RESTORE do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
@@ -210,6 +210,7 @@ group Net:
       disc int[0..10] reboot_cnt = 0;
       disc int[0..300] cur_vel = 0;
       disc bool rec_flag = true;
+      disc bool delay_passed = true;
       disc FaultReason fault_reason = NONE;
       controllable c_calibrate;
       controllable c_enable;
@@ -289,7 +290,7 @@ group Net:
         edge coord._.u_technician_reset;
       location FAULT:
         marked;
-        edge c_recover when rec_flag do rec_flag := not rec_flag goto FAULT;
+        edge c_recover when rec_flag and delay_passed do rec_flag := not rec_flag goto FAULT;
         edge u_recover_failed when not rec_flag do recovery_att_cnt := min(recovery_att_cnt + 1, MAX_RANGE), rec_flag := not rec_flag goto FAULT;
         edge u_cooled when fault_reason = THERMAL do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;
         edge u_fault_cleared when fault_reason = ELECTRICAL or fault_reason = POWER_RESTORE do recovery_att_cnt := 0, fault_reason := NONE, rec_flag := true goto NEEDS_RECAL;

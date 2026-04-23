@@ -9,8 +9,8 @@ set -o pipefail # Catch pipeline failures
 # -----------------------------
 # Compile options
 # -----------------------------
-#load from the drvie in case the file doesnt exist
-cp -rL '/home/martini/shared-drives/G:/My Drive/SCHOOL/Thesis/CIF/Project' CIF
+#load from the drive 
+cp -v -rL '/home/martini/shared-drives/G:/My Drive/SCHOOL/Thesis/CIF/Project' CIF
 
 
 COMPILE_OPTIONS="-DPRINT_OUTPUT=1 -DEVENT_OUTPUT=1 -DCHECK_RANGES=1"

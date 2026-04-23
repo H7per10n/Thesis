@@ -277,6 +277,9 @@ IntType Net_NODE1___cur_vel_;
 /** Discrete variable "bool Net.NODE1._.rec_flag". */
 BoolType Net_NODE1___rec_flag_;
 
+/** Discrete variable "bool Net.NODE1._.delay_passed". */
+BoolType Net_NODE1___delay_passed_;
+
 /** Discrete variable "E Net.NODE1._.fault_reason". */
 NETEnum Net_NODE1___fault_reason_;
 
@@ -303,6 +306,9 @@ IntType Net_NODE2___cur_vel_;
 
 /** Discrete variable "bool Net.NODE2._.rec_flag". */
 BoolType Net_NODE2___rec_flag_;
+
+/** Discrete variable "bool Net.NODE2._.delay_passed". */
+BoolType Net_NODE2___delay_passed_;
 
 /** Discrete variable "E Net.NODE2._.fault_reason". */
 NETEnum Net_NODE2___fault_reason_;
@@ -1473,7 +1479,7 @@ static BoolType execEdge38(void) {
  * @return Whether the edge was performed.
  */
 static BoolType execEdge39(void) {
-    BoolType guard = (((Net_NODE1___) == (_NET_FAULT)) && (Net_NODE1___rec_flag_)) && (((Net_coord___) == (_NET_RECOVERING)) && (((Net_NODE1___recovery_att_cnt_) < (MAX_RECOVERY_)) && (!(LIMIT_EXHAUSTED_()))));
+    BoolType guard = (((Net_NODE1___) == (_NET_FAULT)) && ((Net_NODE1___rec_flag_) && (Net_NODE1___delay_passed_))) && (((Net_coord___) == (_NET_RECOVERING)) && (((Net_NODE1___recovery_att_cnt_) < (MAX_RECOVERY_)) && (!(LIMIT_EXHAUSTED_()))));
     if (!guard) return FALSE;
 
     #if EVENT_OUTPUT
@@ -1629,7 +1635,7 @@ static BoolType execEdge45(void) {
  * @return Whether the edge was performed.
  */
 static BoolType execEdge46(void) {
-    BoolType guard = (((Net_NODE2___) == (_NET_FAULT)) && ((Net_NODE2___rec_flag_) && ((Net_coord___) == (_NET_RECOVERING)))) && (((Net_NODE1___ != _NET_FAULT)) && (((Net_NODE2___recovery_att_cnt_) < (MAX_RECOVERY_)) && (!(LIMIT_EXHAUSTED_()))));
+    BoolType guard = (((Net_NODE2___) == (_NET_FAULT)) && ((Net_NODE2___rec_flag_) && (Net_NODE2___delay_passed_))) && ((((Net_coord___) == (_NET_RECOVERING)) && ((Net_NODE1___ != _NET_FAULT))) && (((Net_NODE2___recovery_att_cnt_) < (MAX_RECOVERY_)) && (!(LIMIT_EXHAUSTED_()))));
     if (!guard) return FALSE;
 
     #if EVENT_OUTPUT
@@ -1815,6 +1821,7 @@ void NET_EngineFirstStep(void) {
     Net_NODE1___reboot_cnt_ = 0;
     Net_NODE1___cur_vel_ = 0;
     Net_NODE1___rec_flag_ = TRUE;
+    Net_NODE1___delay_passed_ = TRUE;
     Net_NODE1___fault_reason_ = _NET_NONE;
     Net_NODE1___ = _NET_INIT;
     Net_NODE2___fault_cnt_ = 0;
@@ -1824,6 +1831,7 @@ void NET_EngineFirstStep(void) {
     Net_NODE2___reboot_cnt_ = 0;
     Net_NODE2___cur_vel_ = 0;
     Net_NODE2___rec_flag_ = TRUE;
+    Net_NODE2___delay_passed_ = TRUE;
     Net_NODE2___fault_reason_ = _NET_NONE;
     Net_NODE2___ = _NET_INIT;
 

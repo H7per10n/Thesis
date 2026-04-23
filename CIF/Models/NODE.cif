@@ -30,7 +30,7 @@ plant def DRV8302_motor_node(uncontrollable u_technician_reset; alg int [0..300]
     //==========================================================================
 
     disc int[0..300] cur_vel = 0;  // Velocity setpoint and actual
-    disc bool rec_flag = true;                 // Recovery protocol (alternating cmd/rsp)
+    disc bool rec_flag = true , delay_passed= true;                 // Recovery protocol (alternating cmd/rsp)
     disc FaultReason fault_reason = NONE;      // Why we're in FAULT (determines recovery path)
 
     //==========================================================================
@@ -220,7 +220,7 @@ plant def DRV8302_motor_node(uncontrollable u_technician_reset; alg int [0..300]
     location FAULT:
         marked;
 
-        edge c_recover when rec_flag do
+        edge c_recover when rec_flag and delay_passed do
             rec_flag := not rec_flag
             goto FAULT;
 

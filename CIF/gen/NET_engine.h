@@ -369,6 +369,9 @@ extern IntType Net_NODE1___cur_vel_;
 /** Discrete variable "bool Net.NODE1._.rec_flag". */
 extern BoolType Net_NODE1___rec_flag_;
 
+/** Discrete variable "bool Net.NODE1._.delay_passed". */
+extern BoolType Net_NODE1___delay_passed_;
+
 /** Discrete variable "E Net.NODE1._.fault_reason". */
 extern NETEnum Net_NODE1___fault_reason_;
 
@@ -395,6 +398,9 @@ extern IntType Net_NODE2___cur_vel_;
 
 /** Discrete variable "bool Net.NODE2._.rec_flag". */
 extern BoolType Net_NODE2___rec_flag_;
+
+/** Discrete variable "bool Net.NODE2._.delay_passed". */
+extern BoolType Net_NODE2___delay_passed_;
 
 /** Discrete variable "E Net.NODE2._.fault_reason". */
 extern NETEnum Net_NODE2___fault_reason_;
