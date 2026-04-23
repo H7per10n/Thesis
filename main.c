@@ -2,7 +2,7 @@
  * main.c – NET supervisor with ANSI TUI
  *
  * HMI:  S=start  X=stop  R=reset  Q=quit  Up/Down or +/-=velocity
- * Loop @ ~20 Hz.  Velocity clamped to [0..300] per the CIF model range.
+ * Loop @ ~100 Hz.  Velocity clamped to [0..300] per the CIF model range.
  */
 
 #define _DEFAULT_SOURCE
