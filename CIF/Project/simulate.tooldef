@@ -1,0 +1,8 @@
+from "lib:cif" import *;
+import java.lang.System.gc;
+gc();
+cifsim(
+   "Synth/output_NET.cif",
+   "-i gui",              // Interactive GUI input mode
+   "--stateviz=1"        // Enable state visualization
+);

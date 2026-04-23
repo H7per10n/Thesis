@@ -1,0 +1,13 @@
+import "NODE.cif";
+import "Coordinator.cif";
+//
+// Network Definition
+//
+group Net:
+    coord: System_Coordinator();
+    NODE1: NODE(1,coord._.u_technician_reset, coord._.velocity);
+    NODE2: NODE(2,coord._.u_technician_reset, coord._.velocity);
+end
+
+
+

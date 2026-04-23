@@ -1,0 +1,8 @@
+from "lib:cif" import *;
+import java.lang.System.gc;
+gc();
+cifcontrollercheck("Synth/output_NET.cif -o Synth/output_NET.cif",
+"--bounded-response-check=yes ",
+"--non-blocking-under-control-check=yes",
+"--finite-response-check=no",
+"--confluence-check=yes");
