@@ -182,7 +182,7 @@ int main(void) {
         tui_set_cycle_us(monotonic_us() - cyc0);
 		delayer_cnt++;
 		//recover delay
-		if (delayer_cnt >= 100) {
+		if (delayer_cnt >= 1000) {
 			Net_NODE1___delay_passed_ = TRUE;
 			delayer_cnt = 0;
 		} else {
