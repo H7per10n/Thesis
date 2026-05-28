@@ -29,34 +29,41 @@ Communication follows the CANCommander register protocol. Controllable events (s
 ## Repository Structure
 
 ```
-thesis/
-    main.typ                 Thesis document (Typst)
-    references.bib           Bibliography
-    img/                     Figures and diagrams
-
-Models/
-    NODE.cif                 Node plant model (DRV8302 motor node EFA)
-    Coordinator.cif          System coordinator plant model
-    NET.cif                  Network instantiation (coordinator + 2 nodes)
-    Requirements.cif         46 formal requirements
-
-Synth/
-    output_NET.cif           Synthesized supervisor (abstract)
-    output_NET_checked.cif   Verified supervisor (with controller properties)
-
-gen/
-    NET_engine.c             Generated supervisor engine
-    NET_engine.h
-    NET_library.c            Generated CIF runtime library
-    NET_library.h
-
-supervisor/
-    main.c                   Supervisor application entry point
-    can_if.c / can_if.h      CAN interface library (SocketCAN)
-    net_tui.c / net_tui.h    Terminal user interface
-
-firmware/
-    node_firmware.ino        Motor drive node firmware (Teensy 4.0)
+.
+├── main.c                   Supervisor application entry point
+├── can_if.c / can_if.h      CAN interface library (Linux SocketCAN)
+├── net_tui.c / net_tui.h    Terminal user interface
+├── BUILD.sh                 Cross-compilation build script
+├── send.sh                  Deployment script (SCP to target board)
+├── simple_test.c            Standalone test harness
+│
+├── Arduino/
+│   ├── TEMPO.ino            Motor drive node firmware (Teensy 4.0)
+│   └── can_node.h           CAN event and register definitions
+│
+├── CIF/
+│   ├── Models/
+│   │   ├── NODE.cif         Node plant model (DRV8302 motor node EFA)
+│   │   ├── Coordinator.cif  System coordinator plant model
+│   │   ├── NET.cif          Network instantiation (coordinator + 2 nodes)
+│   │   └── Requirements.cif 46 formal requirements
+│   ├── Synth/
+│   │   └── output_NET.cif   Synthesized supervisor
+│   ├── gen/
+│   │   ├── NET_engine.c     Generated supervisor engine
+│   │   ├── NET_engine.h
+│   │   ├── NET_library.c    Generated CIF runtime library
+│   │   ├── NET_library.h
+│   │   └── NET_test_code.c  Generated test skeleton
+│   ├── synthesize.tooldef   Synthesis script
+│   ├── properties.tooldef   Controller properties check script
+│   ├── simulate.tooldef     Interactive simulation script
+│   └── generate_code.tooldef Code generation script
+│
+├── bin/                     Compiled objects and ARM binary
+│
+├── Thesis.pdf               Compiled thesis document
+└── Thesis.zip               Thesis source (Typst)
 ```
 
 ## Dependencies
@@ -75,35 +82,44 @@ firmware/
 - CIF toolset for synthesis, simulation, controller properties checking, and C99 code generation
 
 **Thesis document**
-- Typst (https://typst.app/)
+- Typst (https://typst.app/) — source included in Thesis.zip
 
 ## Building
 
 **Supervisor**
 
-Cross-compile the generated engine together with the integration code:
+Run the provided build script, which cross-compiles the generated engine together with the integration code for the ARM target:
 
 ```
-arm-linux-gnueabihf-gcc -std=c99 -O2 \
-    gen/NET_engine.c gen/NET_library.c \
-    supervisor/main.c supervisor/can_if.c supervisor/net_tui.c \
-    -o supervisor_app
+./BUILD.sh
 ```
 
-Deploy the resulting binary to the Luckfox board and run over SSH.
+This produces `bin/NET_engine_arm`. Deploy to the Luckfox board using the provided script:
+
+```
+./send.sh
+```
+
+Connect via SSH and run the binary on the target.
 
 **Node firmware**
 
-Open the firmware project in PlatformIO or the Arduino IDE configured for Teensy 4.0, install the SimpleFOC and FlexCAN_T4 libraries, and upload to each node.
+Open `Arduino/TEMPO.ino` in PlatformIO or the Arduino IDE configured for Teensy 4.0, install the SimpleFOC and FlexCAN_T4 libraries, and upload to each node.
 
 **Synthesis (reproducing the supervisor from models)**
 
-From the ESCET IDE or command line:
+From the ESCET IDE, run the tooldef scripts in order:
+
+1. `CIF/synthesize.tooldef` — synthesizes the supervisor from plant and requirement models
+2. `CIF/properties.tooldef` — verifies bounded response, confluence, and non-blocking
+3. `CIF/generate_code.tooldef` — generates C99 code into `CIF/gen/`
+
+Alternatively, from the command line:
 
 ```
-cifdatasynth("Models/Requirements.cif -o Synth/output_NET.cif");
-cifcontrollercheck("Synth/output_NET.cif -o Synth/output_NET_checked.cif");
-cifcodegen("Synth/output_NET_checked.cif -o gen/ -l c99 -p NET");
+cifdatasynth("CIF/Models/Requirements.cif -o CIF/Synth/output_NET.cif");
+cifcontrollercheck("CIF/Synth/output_NET.cif -o CIF/Synth/output_NET_checked.cif");
+cifcodegen("CIF/Synth/output_NET_checked.cif -o CIF/gen/ -l c99 -p NET");
 ```
 
 ## Key Metrics
