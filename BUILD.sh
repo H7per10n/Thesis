@@ -10,9 +10,10 @@ set -o pipefail # Catch pipeline failures
 # Compile options
 # -----------------------------
 #load from the drive 
-cp -v -rL '/home/martini/shared-drives/G:/My Drive/SCHOOL/Thesis/CIF/Project' CIF
-
-
+if [ "$1" = "sync" ]; then
+    rsync -avL --delete '/home/martini/shared-drives/G:/My Drive/SCHOOL/Thesis/CIF/Project/' CIF/
+    echo "Sync completed"
+fi
 COMPILE_OPTIONS="-DPRINT_OUTPUT=1 -DEVENT_OUTPUT=1 -DCHECK_RANGES=1"
 
 # Paths
@@ -20,7 +21,7 @@ GEN_SRC="CIF/gen"
 DEST_DIR="bin"
 
 # Compiler flags
-CFLAGS="-Wall -static -std=c99 -O2 -g $COMPILE_OPTIONS"
+CFLAGS="-Wall -static -std=c99 -O2 -g $COMPILE_OPTIONS -include stdbool.h"
 INCLUDES=(-I. -I"$GEN_SRC")
 LFLAGS="-lm -lpthread"
 

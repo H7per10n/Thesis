@@ -36,7 +36,7 @@ EXTENSIBILITY:
 //==============================================================================
 
 plant def sys_coordinator():
-    //==========================================================================
+
     // OPERATOR INTERFACE (Application-specific)
     //==========================================================================
     // General: System start/stop commands
@@ -45,7 +45,7 @@ plant def sys_coordinator():
     uncontrollable u_start;  // Operator: Start coordinated operation
     uncontrollable u_stop;   // Operator: Stop coordinated operation
     uncontrollable u_technician_reset;
-    //==========================================================================
+
     // AUTONOMOUS TRANSITIONS (Supervisor-determined)
     //==========================================================================
     // General: System-level state transitions based on node health
@@ -131,5 +131,4 @@ group def System_Coordinator():
      plant invariant _.u_start                       needs HMI._u_start and not HMI._u_stop;
      plant invariant _.u_stop                        needs HMI._u_stop and not HMI._u_start;
      plant invariant _.u_technician_reset            needs HMI._u_technician_reset;
-//UNCOMMENT FOR DEPLOYMENT
 end

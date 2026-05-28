@@ -1,25 +1,17 @@
-//==============================================================================
-// DRV8302 BLDC Motor Node - Formal Model
+// Author Stavros Martini
+//
+// DRV8302 BLDC Motor Node -
 //==============================================================================
 //
 // HARDWARE: 7-pole BLDC, DRV8302 driver, Teensy 4.0, SimpleFOC
 // FAULTS: ELECTRICAL (nFAULT=0,nOCTW=1), THERMAL (nFAULT=0,nOCTW=0), NO_POWER (PWRGD=0)
 // RECOVERY: Electrical EN_GATE reset, Thermal -> passive cooling, Power -> restore+recover
-//
-//==============================================================================
+
 
 enum FaultReason = NONE, ELECTRICAL, THERMAL, POWER_RESTORE;
 
 plant def DRV8302_motor_node(uncontrollable u_technician_reset; alg int [0..300] tar_vel):
-
     const int MAX_RANGE = 10;
-
-    //==========================================================================
-    // COUNTERS (Supervisor-visible safety metrics)
-    //==========================================================================
-    // Increment: min(counter+1, MAX_RANGE) - saturating arithmetic
-    // Reset: Successful calibration (all operational) or reboot (all)
-
     disc int[0..MAX_RANGE] fault_cnt = 0,              // u_fault, u_overheated (total faults)
                                power_cc_cnt = 0,        // u_no_power        (total power cycles)
                                recovery_att_cnt = 0,   // u_recover_failed  (consecutive recoveries)
@@ -289,10 +281,9 @@ end
 // node_id is algebraic parameter (compile-time constant) for CAN addressing.
 //
 
-
 group  def  NODE(alg int [1..254] node_id ; uncontrollable u_technician_reset ; alg int [0..300] tar_vel):
        _: DRV8302_motor_node(u_technician_reset, tar_vel);
-     CAN: CAN_IF();
+    CAN: CAN_IF();
         // Plant invariants linking events to input flags
      plant invariant _.u_setup_ok         needs CAN.Evt_setup_ok;
      plant invariant _.u_setup_error      needs CAN.Evt_setup_error;

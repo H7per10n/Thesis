@@ -287,67 +287,11 @@ requirement Net.NODE1._.c_cal_reject needs false;
 requirement Net.NODE2._.c_cal_reject needs false;
 
 
-//==============================================================================
-// SUMMARY: 31 Requirements Across 7 Categories
-//==============================================================================
-// Category 1: Coordinator Autonomous Transitions (8)
-// Category 2: Phase Gating (4)
-// Category 3: Hardware Constraints (2)
-// Category 4: Sequential Recovery (1)
-// Category 5: Counter-Based Safety (6)
-// Category 6: HVAC Synchronous Operation (2)
-// Category 7: Preventive Safety (4)
-//==============================================================================
-
-
-/*
-
- **System Positioning**
-
- **In Your Thesis/Paper:**
-
-Title: "Distributed BLDC Motor Control Network with Formal Supervisor Synthesis"
-
-Abstract snippet:
-"We present a scalable distributed control architecture for networked BLDC
-motors with formal safety guarantees. The system supports arbitrary N motors
-on a CAN bus with coordinated supervision. We demonstrate the approach on a
-dual-motor (N=2) balanced ventilation system (HRV/ERV), where coordinated
-control ensures pressure stability critical for building safety and indoor
-air quality."
-
-Contributions:
-1. General N-node architecture with CIF formal specification
-2. Autonomous fault recovery with counter-based safety limits
-3. Application-specific coordination policies (demonstrated: HVAC)
-4. Experimental validation on dual-motor ventilation system
-```
-
- **In Presentations:**
-
-Slide 1: "Distributed Motor Control Network (General)"
-  - Scalable to N motors
-  - CAN bus communication
-  - Formal supervisor synthesis
-
-Slide 2: "Experimental Demonstration (N=2 HVAC)"
-  - Supply + Exhaust fans
-  - Balanced airflow requirement
-  - Safety-critical application
-
-Slide 3: "Requirements adapt to application"
-  - HVAC: Synchronous (both-or-nothing)
-  - Other: Independent, hierarchical, etc.
-
-  */
-
 
 
 //==============================================================================
 // CATEGORY 8: CONFLUENCE RESOLUTION (8 requirements)
 //==============================================================================
-//
-
 requirement Net.NODE1._.c_reboot needs Net.coord._.RECOVERING;
 requirement Net.NODE2._.c_reboot needs Net.coord._.RECOVERING;
 

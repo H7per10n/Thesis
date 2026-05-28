@@ -5,8 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "NET_engine.h"
-#include <stdbool.h>
-
 
 #ifndef MAX_NUM_ITERS
 #define MAX_NUM_ITERS 1000

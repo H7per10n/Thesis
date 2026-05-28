@@ -1,5 +1,0 @@
-from "lib:cif" import *;
-import java.lang.System.gc;
-gc();
-cifdatasynth("Models/Requirements.cif  -o Synth/output_NET.cif");
-
