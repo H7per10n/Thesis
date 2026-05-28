@@ -322,7 +322,9 @@ In all cases the supervisor behaved as the formal model predicted. No deadlocks,
 </p>
 
 The display shows coordinator phase and velocity setpoint, per-node state with color coding (green = healthy, red = fault), diagnostic counters, and the real-time event log.
-
+<p align="center">
+   <img src="Thesis/img/System_Katopsi_finaliteto.png" alt="Real Physical System width=90%>
+</p>
 ---
 
 ## References
