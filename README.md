@@ -27,7 +27,7 @@ The architecture is validated on a physical two-node motor network implementing 
 
 | Parameter | Value |
 |---|---|
-| Board | [Luckfox Lyra Plus](https://www.luckfox.com/Luckfox-Lyra/EN-Luckfox-Lyra-Plus) |
+| Board | [Luckfox Lyra Plus](https://www.luckfox.com/Luckfox-Lyra-Plus?search=Lyra%20plus&category_id=0) |
 | SoC | [Rockchip RK3506G2](https://opensource.rock-chips.com/images/5/51/Rockchip_RK3506G2_Datasheet_V1.3-20250811.pdf) |
 | CPU | Triple-core ARM Cortex-A7 at 1.2 GHz |
 | Memory | 128 MB DDR3L |
